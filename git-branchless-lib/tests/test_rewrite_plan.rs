@@ -15,6 +15,7 @@ use branchless::core::rewrite::{
     execute_rebase_plan, BuildRebasePlanOptions, ExecuteRebasePlanOptions, ExecuteRebasePlanResult,
     RebasePlan, RebasePlanBuilder, RepoResource,
 };
+use branchless::git::SignOption;
 use branchless::testing::{make_git, Git};
 
 #[test]
@@ -707,6 +708,58 @@ fn test_plan_fixup_parent_into_child() -> eyre::Result<()> {
     Ok(())
 }
 
+#[test]
+fn test_plan_fixup_child_into_parent() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+    git.detach_head()?;
+    let _test1_oid = git.commit_file("test1", 1)?;
+    let test2_oid = git.commit_file("test2", 2)?;
+    let test3_oid = git.commit_file("test3", 3)?;
+
+    create_and_execute_plan(&git, move |builder: &mut RebasePlanBuilder| {
+        builder.fixup_commit(test3_oid, test2_oid)?;
+        Ok(())
+    })?;
+
+    let (stdout, _stderr) = git.run(&["smartlog"])?;
+    insta::assert_snapshot!(stdout, @r###"
+        O f777ecc (master) create initial.txt
+        |
+        o 62fc20d create test1.txt
+        |
+        @ 64da0f2 create test2.txt
+        "###);
+
+    Ok(())
+}
+
+#[test]
+fn test_plan_fixup_parent_into_child() -> eyre::Result<()> {
+    let git = make_git()?;
+    git.init_repo()?;
+    git.detach_head()?;
+    let _test1_oid = git.commit_file("test1", 1)?;
+    let test2_oid = git.commit_file("test2", 2)?;
+    let test3_oid = git.commit_file("test3", 3)?;
+
+    create_and_execute_plan(&git, move |builder: &mut RebasePlanBuilder| {
+        builder.fixup_commit(test2_oid, test3_oid)?;
+        Ok(())
+    })?;
+
+    let (stdout, _stderr) = git.run(&["smartlog"])?;
+    insta::assert_snapshot!(stdout, @r###"
+        O f777ecc (master) create initial.txt
+        |
+        o 62fc20d create test1.txt
+        |
+        @ 1f599a2 create test3.txt
+        "###);
+
+    Ok(())
+}
+
 /// Helper function to handle the boilerplate involved in creating, building
 /// and executing the rebase plan.
 fn create_and_execute_plan(
@@ -765,6 +818,7 @@ fn create_and_execute_plan(
             reset: false,
             render_smartlog: false,
         },
+        sign_option: SignOption::Disable,
     };
     let git_run_info = git.get_git_run_info();
     let result = execute_rebase_plan(
